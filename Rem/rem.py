@@ -6,6 +6,9 @@ import pythoncom
 import time
 import json
 import socket
+import sys
+
+PY2=sys.version_info[0]==2
 
 SPECIAL_KEYS={
     'Lcontrol','Lmenu','Lwin','Rcontrol','Rmenu','Rwin',
@@ -64,10 +67,10 @@ class Pumper:
         threading.Thread(target=self.connector).start()
 
     def connector(self):
-        s=socket.socket()
         while True:
             try:
                 print('connecting to ram')
+                s=socket.socket()
                 s.connect(RAM_ADDR)
                 print('connected')
                 while True:
@@ -80,7 +83,7 @@ class Pumper:
                         with self.lock:
                             self.chunks=[]
                     time.sleep(.5)
-            except (ConnectionRefusedError,ConnectionAbortedError):
+            except socket.error:
                 time.sleep(1)
 
     def pump(self):
@@ -94,11 +97,15 @@ class Pumper:
             self.pump()
         self.msg=Chunk(typ,value)
 
+    def breakout(self,typ,value):
+        with self.lock:
+            self.chunks.append(Chunk(typ,value).json())
+
 pumper=Pumper()
 holdkey=set()
 last_time=0
 paused=False
-current_id=None
+current_title=None
 status='idle'
 
 def hooker():
@@ -115,16 +122,16 @@ def keydown(event):
 
     global status
     global last_time
-    global current_id
+    global current_title
     holdkey.add(event.Key)
 
     if paused or event.Key in SHIFT:
         return True
 
-    if current_id!=event.Window:
-        current_id=event.Window
-        pumper.create('title',event.WindowName)
-        status='idle'
+    window_name=(event.WindowName or '(None)').decode('gbk', 'ignore') if PY2 else (event.WindowName or '(None)')
+    if current_title!=window_name:
+        current_title=window_name
+        pumper.breakout('title', [event.Window,window_name])
 
     if status=='string':
         if event.Key in SPECIAL_KEYS or time.time()-last_time>STRING_TIMEOUT:
