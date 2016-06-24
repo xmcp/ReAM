@@ -100,7 +100,7 @@ def handle(s, addr):
         x=li.curselection()
         if x:
             te.see('ind_%d'%x[0])
-
+            
     li.bind('<<ListboxSelect>>',select_callback)
 
     te.tag_config('warning',foreground='#fff',background='#f00')
@@ -112,12 +112,18 @@ def handle(s, addr):
     te.tag_config('time',background='#0f0')
     te.tag_config('img',background='#00f',foreground='#fff')
 
+    def breaker(event):
+        if event.keysym not in ('Alt_L','Alt_R','F4'):
+            return 'break'
+            
+    te.bind('<KeyPress>',breaker)
+    
     def clicker(event):
         def _show_img(imgid):
             tl=Toplevel(tk)
             tl.title('Screenshot #%d'%imgid)
             tl.attributes('-topmost',True)
-            #tl.attributes('-toolwindow',True)
+            tl.attributes('-toolwindow',True)
             tl.rowconfigure(0,weight=1)
             tl.columnconfigure(0,weight=1)
             tl.focus_force()
@@ -151,6 +157,10 @@ def handle(s, addr):
                 midwidth+imgwidth/2+20,midheight+imgheight/2+20)
             canvas.create_image(midwidth,midheight,anchor=CENTER,image=img)
             canvas.fuck_python_gc=img
+            
+            tl.geometry('%dx%d'%(
+                min(imgwidth+40,tl.winfo_screenwidth()-150),min(imgheight+40,tl.winfo_screenheight()-150)
+            ))
 
         mark=te.mark_next(te.index('@%s,%s -1 lines +2 chars'%(event.x,event.y)))
         if mark.startswith('img_') and mark[4:].isdigit:
