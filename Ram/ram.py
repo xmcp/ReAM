@@ -37,7 +37,6 @@ class FancyPrefix:
             (' >> ' if catagory!=self.catagory else '    ')+value
         self.time=now_time
         self.catagory=catagory
-        print(out)
         return out
 
 def _scroll(root,clas,config,row,column):

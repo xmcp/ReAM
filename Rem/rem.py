@@ -32,7 +32,11 @@ NICKNAME={
 }
 STRING_TIMEOUT=2
 SCREENSHOT_THRESHOLD_TIME=.5
-RAM_ADDR=('127.0.0.1',48684)
+
+with open('addr.txt','r') as f:
+    RAM_ADDR=f.read().strip().split(':')
+    RAM_ADDR[1]=int(RAM_ADDR[1])
+    print(RAM_ADDR)
 
 last_screenshot_time=0
 
@@ -81,7 +85,7 @@ class Pumper:
             try:
                 print('connecting to ram')
                 s=socket.socket()
-                s.connect(RAM_ADDR)
+                s.connect(tuple(RAM_ADDR))
                 print('connected')
                 while True:
                     with self.lock:
